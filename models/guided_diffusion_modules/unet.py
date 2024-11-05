@@ -13,6 +13,27 @@ from .nn import (
     gamma_embedding
 )
 
+# from .LDCONV2D2 import *
+
+from .MLLA1 import *
+
+
+# from .cbam_eca import *
+
+# from nn import (
+#     checkpoint,
+#     zero_module,
+#     normalization,
+#     count_flops_attn,
+#     gamma_embedding
+# )
+
+# from cbam_eca import *
+
+# from LDCONV2D2 import *
+
+# from MLLA1 import *
+
 class SiLU(nn.Module):
     def forward(self, x):
         return x * torch.sigmoid(x)
@@ -57,6 +78,7 @@ class Upsample(nn.Module):
         self.use_conv = use_conv
         if use_conv:
             self.conv = nn.Conv2d(self.channels, self.out_channel, 3, padding=1)
+            # self.conv = LDConv_MultiScale(inc=self.channels,outc=self.out_channel,num_param=3)
 
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -82,6 +104,7 @@ class Downsample(nn.Module):
             self.op = nn.Conv2d(
                 self.channels, self.out_channel, 3, stride=stride, padding=1
             )
+            # self.op = LDConv_MultiScale(inc=self.channels,outc=self.out_channel,num_param=3)
         else:
             assert self.channels == self.out_channel
             self.op = nn.AvgPool2d(kernel_size=stride, stride=stride)
@@ -131,6 +154,7 @@ class ResBlock(EmbedBlock):
             normalization(channels),
             SiLU(),
             nn.Conv2d(channels, self.out_channel, 3, padding=1),
+            # LDConv_MultiScale(inc=channels,outc=self.out_channel,num_param=3)
         )
 
         self.updown = up or down
@@ -157,6 +181,7 @@ class ResBlock(EmbedBlock):
             nn.Dropout(p=dropout),
             zero_module(
                 nn.Conv2d(self.out_channel, self.out_channel, 3, padding=1)
+                # LDConv_MultiScale(inc=self.out_channel,outc=self.out_channel,num_param=3)
             ),
         )
 
@@ -166,8 +191,10 @@ class ResBlock(EmbedBlock):
             self.skip_connection = nn.Conv2d(
                 channels, self.out_channel, 3, padding=1
             )
+            # self.skip_connection = LDConv_MultiScale(inc=channels,outc=self.out_channel,num_param=3)
         else:
             self.skip_connection = nn.Conv2d(channels, self.out_channel, 1)
+            # self.skip_connection = LDConv_MultiScale(inc=channels,outc=self.out_channel,num_param=3)
 
     def forward(self, x, emb):
         """
@@ -393,6 +420,7 @@ class UNet(nn.Module):
         ch = input_ch = int(channel_mults[0] * inner_channel)
         self.input_blocks = nn.ModuleList(
             [EmbedSequential(nn.Conv2d(in_channel, ch, 3, padding=1))]
+            # [EmbedSequential(LDConv_MultiScale(inc=in_channel,outc=ch,num_param=3))]
         )
         self._feature_size = ch
         input_block_chans = [ch]
@@ -412,13 +440,17 @@ class UNet(nn.Module):
                 ch = int(mult * inner_channel)
                 if ds in attn_res:
                     layers.append(
-                        AttentionBlock(
-                            ch,
-                            use_checkpoint=use_checkpoint,
-                            num_heads=num_heads,
-                            num_head_channels=num_head_channels,
-                            use_new_attention_order=use_new_attention_order,
-                        )
+                        # AttentionBlock(
+                        #     ch,
+                        #     use_checkpoint=use_checkpoint,
+                        #     num_heads=num_heads,
+                        #     num_head_channels=num_head_channels,
+                        #     use_new_attention_order=use_new_attention_order,
+                        # )
+
+                        MKLAttention(ch)
+
+                        # CBAM(ch)
                     )
                 self.input_blocks.append(EmbedSequential(*layers))
                 self._feature_size += ch
@@ -455,13 +487,18 @@ class UNet(nn.Module):
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
             ),
-            AttentionBlock(
-                ch,
-                use_checkpoint=use_checkpoint,
-                num_heads=num_heads,
-                num_head_channels=num_head_channels,
-                use_new_attention_order=use_new_attention_order,
-            ),
+            # AttentionBlock(
+            #     ch,
+            #     use_checkpoint=use_checkpoint,
+            #     num_heads=num_heads,
+            #     num_head_channels=num_head_channels,
+            #     use_new_attention_order=use_new_attention_order,
+            # ),
+
+            # CBAM(ch),
+
+            MKLAttention(ch),
+
             ResBlock(
                 ch,
                 cond_embed_dim,
@@ -489,13 +526,17 @@ class UNet(nn.Module):
                 ch = int(inner_channel * mult)
                 if ds in attn_res:
                     layers.append(
-                        AttentionBlock(
-                            ch,
-                            use_checkpoint=use_checkpoint,
-                            num_heads=num_heads_upsample,
-                            num_head_channels=num_head_channels,
-                            use_new_attention_order=use_new_attention_order,
-                        )
+                        # AttentionBlock(
+                        #     ch,
+                        #     use_checkpoint=use_checkpoint,
+                        #     num_heads=num_heads_upsample,
+                        #     num_head_channels=num_head_channels,
+                        #     use_new_attention_order=use_new_attention_order,
+                        # )
+
+                        MKLAttention(ch)
+
+                        # CBAM(ch)
                     )
                 if level and i == res_blocks:
                     out_ch = ch
@@ -520,6 +561,7 @@ class UNet(nn.Module):
             normalization(ch),
             SiLU(),
             zero_module(nn.Conv2d(input_ch, out_channel, 3, padding=1)),
+            # zero_module(LDConv_MultiScale(inc=input_ch,outc=out_channel,num_param=3)),
         )
 
     def forward(self, x, gammas):
@@ -558,3 +600,4 @@ if __name__ == '__main__':
     x = torch.randn((b, c, h, w))
     emb = torch.ones((b, ))
     out = model(x, emb)
+    print(out.shape)
